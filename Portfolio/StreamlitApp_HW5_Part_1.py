@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import posixpath
+import json 
 
 import joblib
 import tarfile
@@ -13,13 +14,13 @@ import boto3
 import sagemaker
 from sagemaker.predictor import Predictor
 from sagemaker.serializers import CSVSerializer
-from sagemaker.deserializers import JSONDeserializer
+from sagemaker.serializers import JSONSerializer 
+from sagemaker.deserializers import JSONDeserializer 
 from sagemaker.serializers import NumpySerializer
 from sagemaker.deserializers import NumpyDeserializer
 
 from sklearn.pipeline import Pipeline
 import shap
-
 
 # Setup & Path Configuration
 warnings.simplefilter("ignore")
@@ -30,7 +31,7 @@ project_root = os.path.abspath(os.path.join(current_dir, '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-#from src.feature_utils import extract_features
+from src.feature_utils import convert_input_pca_regression
 
 # Access the secrets
 aws_id = st.secrets["aws_credentials"]["AWS_ACCESS_KEY_ID"]
@@ -52,15 +53,12 @@ def get_session(aws_id, aws_secret, aws_token):
 session = get_session(aws_id, aws_secret, aws_token)
 sm_session = sagemaker.Session(boto_session=session)
 
-# Data & Model Configuration
-#df_features = extract_features()
-
 MODEL_INFO = {
         "endpoint": aws_endpoint,
-        "explainer": 'explainer_pca.shap',
-        "pipeline": 'finalized_pca_model.tar.gz',
-        "keys": ["IBM"],
-        "inputs": [{"name": k, "type": "number", "min": 0.0, "default": 100.0, "step": 10.0} for k in ["IBM"]]
+        "explainer": 'explainer_pca.shap', 
+        "pipeline": 'finalized_pca_model.tar.gz', 
+        "keys": ["IBM_CR_Cum","NVDA_CR_Cum"], 
+        "inputs": [{"name": k, "type": "number", "min": -100.0, "max": 100.0, "default": 0.0, "step": 10.0} for k in ["IBM_CR_Cum","NVDA_CR_Cum"]] 
 }
 
 def load_pipeline(_session, bucket, key):
@@ -96,7 +94,7 @@ def call_model_api(input_df):
     predictor = Predictor(
         endpoint_name=MODEL_INFO["endpoint"],
         sagemaker_session=sm_session,
-        serializer=NumpySerializer(),
+        serializer=JSONSerializer(), 
         deserializer=NumpyDeserializer() 
     )
 
@@ -111,35 +109,24 @@ def call_model_api(input_df):
 def display_explanation(input_df, session, aws_bucket):
     explainer_name = MODEL_INFO["explainer"]
     explainer = load_shap_explainer(session, aws_bucket, posixpath.join('explainer', explainer_name),os.path.join(tempfile.gettempdir(), explainer_name))
-    shap_values = explainer(input_df)
 
-    dataset = pd.read_csv(r'./SP500Data.csv',index_col=0)
-    random = 'IBM'
-    random_price = json.loads(request_body)[random]
-    closest_date = (dataset[random] - float(random_price)).abs().idxmin()
-
-    return_period=5
-
-    X = np.log(dataset.drop([random],axis=1)).diff(return_period)
-    X = np.exp(X).cumsum()
-    X.columns = [name + "_CR_Cum" for name in X.columns]
-
-    input_df=X.loc[[closest_date]]
+    raw_json_input = json.dumps(input_df)
+    input_df = convert_input_pca_regression(raw_json_input, 'application/json')
 
     best_pipeline = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
-
-    preprocessing_pipeline = Pipeline(steps=best_pipeline.steps[0:2])
-    input_df_transformed = preprocessing_pipeline.transform(X)
-    feature_names = best_pipeline[:-1].get_feature_names_out()
-    input_df_transformed = pd.DataFrame(input_df_transformed, columns=feature_names)
-    shap_values = explainer(input_df_transformed)
-
+    
+    preprocessing_pipeline = Pipeline(steps=best_pipeline.steps[0:2]) 
+    input_df_transformed = preprocessing_pipeline.transform(input_df) 
+    feature_names = best_pipeline[0:2].get_feature_names_out() 
+    input_df_transformed = pd.DataFrame(input_df_transformed, columns=feature_names) 
+    shap_values = explainer(input_df_transformed) 
+  
     st.subheader("🔍 Decision Transparency (SHAP)")
     fig, ax = plt.subplots(figsize=(10, 4))
     shap.plots.waterfall(shap_values[0], max_display=10)
     st.pyplot(fig)
-    # top feature   
-    top_feature = shap_values[0].feature_names[0]
+    # top feature 
+    top_feature = pd.Series(shap_values[0].values, index=shap_values[0].feature_names).abs().idxmax()
     st.info(f"**Business Insight:** The most influential factor in this decision was **{top_feature}**.")
 
 # Streamlit UI
@@ -155,17 +142,12 @@ with st.form("pred_form"):
         with cols[i % 2]:
             user_inputs[inp['name']] = st.number_input(
                 inp['name'].replace('_', ' ').upper(),
-                min_value=inp['min'], value=inp['default'], step=inp['step']
+                min_value=inp['min'], max_value=inp['max'], value=inp['default'], step=inp['step']
             )
     
     submitted = st.form_submit_button("Run Prediction")
 
 if submitted:
-
-    #data_row = [user_inputs[k] for k in MODEL_INFO["keys"]]
-    # Prepare data
-    #base_df = df_features
-    #input_df = pd.concat([base_df, pd.DataFrame([data_row], columns=base_df.columns)])
     
     res, status = call_model_api(user_inputs)
     if status == 200:
