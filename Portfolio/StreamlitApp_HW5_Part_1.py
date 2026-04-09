@@ -110,10 +110,10 @@ def display_explanation(input_df, session, aws_bucket):
     explainer_name = MODEL_INFO["explainer"]
     explainer = load_shap_explainer(session, aws_bucket, posixpath.join('explainer', explainer_name),os.path.join(tempfile.gettempdir(), explainer_name))
 
+    best_pipeline = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
+
     raw_json_input = json.dumps(input_df)
     input_df = convert_input_pca_regression(raw_json_input, 'application/json')
-
-    best_pipeline = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
     
     preprocessing_pipeline = Pipeline(steps=best_pipeline.steps[0:3])  # imputer + scaler + kpca
     input_df_transformed = preprocessing_pipeline.transform(input_df)
