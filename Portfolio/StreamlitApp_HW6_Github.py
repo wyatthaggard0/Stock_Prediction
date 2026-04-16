@@ -1,5 +1,4 @@
 import os, sys, warnings
-import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -12,15 +11,12 @@ import tempfile
 import boto3
 import sagemaker
 from sagemaker.predictor import Predictor
-from sagemaker.serializers import CSVSerializer
-from sagemaker.deserializers import JSONDeserializer
 from sagemaker.serializers import NumpySerializer
 from sagemaker.deserializers import NumpyDeserializer
 
 from sklearn.pipeline import Pipeline
 import shap
 
-from joblib import dump
 from joblib import load
 
 
@@ -59,19 +55,21 @@ sm_session = sagemaker.Session(boto_session=session)
 # Data & Model Configuration
 df_features = extract_features()
 
-# Option 1 (Regression): features used to predict NFLX future daily return
+# Option 1 (Regression): features used to predict AMZN future daily return
+# Sentiment column: sentiment_lex (Lexicon-based)
 _price_inputs = [
-    {"name": "ADBE",               "type": "number", "min": 0.0,  "max": 350.0,  "default": 100.0, "step": 1.0},
-    {"name": "GOOG",               "type": "number", "min": 0.0,  "max": 1500.0, "default": 600.0, "step": 1.0},
-    {"name": "AMZN",               "type": "number", "min": 0.0,  "max": 2500.0, "default": 500.0, "step": 1.0},
-    {"name": "sentiment_textblob", "type": "number", "min": -1.0, "max": 1.0,    "default": 0.0,   "step": 0.01},
+    {"name": "ADBE",          "type": "number", "min": 0.0,  "max": 350.0,  "default": 100.0, "step": 1.0},
+    {"name": "GOOG",          "type": "number", "min": 0.0,  "max": 1500.0, "default": 600.0, "step": 1.0},
+    {"name": "NFLX",          "type": "number", "min": 0.0,  "max": 500.0,  "default": 150.0, "step": 1.0},
+    {"name": "MSFT",          "type": "number", "min": 0.0,  "max": 150.0,  "default": 50.0,  "step": 1.0},
+    {"name": "sentiment_lex", "type": "number", "min": -1.0, "max": 1.0,    "default": 0.0,   "step": 0.01},
 ]
 
 MODEL_INFO = {
         "endpoint": aws_endpoint,
         "explainer": 'explainer_sentiment.shap',
         "pipeline": 'finalized_sentiment_model.tar.gz',
-        "keys": ['ADBE', 'GOOG', 'AMZN', 'sentiment_textblob'],
+        "keys": ['ADBE', 'GOOG', 'NFLX', 'MSFT', 'sentiment_lex'],
         "inputs": _price_inputs,
 }
 
